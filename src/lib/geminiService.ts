@@ -11,120 +11,178 @@ const getGeminiAPI = () => {
   return new GoogleGenerativeAI(apiKey);
 };
 
-// Define the prompt for generating show notes
-const generateShowNotesPrompt = (transcript: string) => {
-  return `
-You are an elite podcast show-note writer for "Crazy Wisdom".
+// Model names can be overridden via env; default to Gemini 2 family
+const MODEL_OVERVIEW =
+  process.env.NEXT_PUBLIC_GEMINI_MODEL_OVERVIEW || 'gemini-2.0-flash';
+
+const MODEL_DEEPDIVE =
+  process.env.NEXT_PUBLIC_GEMINI_MODEL_DEEPDIVE || 'gemini-2.5-pro-preview-05-06';
+
+// Helper to get a GenerativeModel instance for an arbitrary model name
+const getGeminiModel = (model: string) => {
+  const genAI = getGeminiAPI();
+  return genAI.getGenerativeModel({
+    model,
+    safetySettings: [
+      {
+        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+      },
+      {
+        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+      },
+    ],
+  });
+};
+
+// ────────────────────────────────────────────────────────────
+// Timestamped transcript utilities
+// ────────────────────────────────────────────────────────────
+export type Segment = { ts: string; text: string };
+
+// 1️⃣ Parse .srt / markdown transcripts that contain lines
+// like "00:00:00,000 --> 00:00:07,680" followed by text.
+export function parseTimestampedTranscript(raw: string): Segment[] {
+  const segs: Segment[] = [];
+  const pattern = /(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}\s*\n([\s\S]*?)(?=\n\d+\n\d{2}:\d{2}:\d{2},\d{3}|$)/g;
+  for (const match of raw.matchAll(pattern)) {
+    const [_, ts, block] = match;
+    const text = block.trim().replace(/\n+/g, ' ');
+    segs.push({ ts, text });
+  }
+  // Fallback: if regex missed, return entire raw as single segment
+  if (segs.length === 0) {
+    segs.push({ ts: '00:00', text: raw });
+  }
+  return segs;
+}
+
+// 2️⃣ Strip timestamps → plain narrative for LLM
+const stripTimestamps = (segs: Segment[]) => segs.map((s) => s.text).join(' ');
+
+// 3️⃣ Find timestamp for the first sentence of a chapter
+function lookupTimestamp(sentence: string, segs: Segment[]): string {
+  const normalise = (str: string) => str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
+  const key = normalise(sentence).slice(0, 60);
+  for (const seg of segs) {
+    if (normalise(seg.text).includes(key)) {
+      // Return MM:SS from HH:MM:SS,mmm
+      return seg.ts.slice(3, 8);
+    }
+  }
+  return '??:??';
+}
+
+// ────────────────────────────────────────────────────────────
+// Prompt helpers
+// ────────────────────────────────────────────────────────────
+
+const generateOverviewPrompt = (plain: string) => `You are an elite podcast show-note writer for \"Crazy Wisdom\".
+
+TASK: Analyse the transcript and propose 6-10 thematic chapters.
+Return ONLY valid JSON in the exact form:
+[
+  { "title": "<chapter name>", "first": "<first sentence of that chapter>" },
+  ...
+]
+Do NOT wrap in Markdown fences, no other keys, no commentary.
+
+Transcript:
+${plain}`;
+
+const generateDeepDivePrompt = (
+  transcript: string,
+  chapters: { title: string; start: string }[],
+) => {
+  const chapterList = chapters.map((c) => `${c.start} ${c.title}`).join('\n');
+  return `You are an elite podcast show-note writer for \"Crazy Wisdom\".
 
 STYLE & TONE
 -------------
 Follow the style and tone of the example below.  
-• Write in the first-person voice of the host, Stewart Alsop ("I, Stewart Alsop, ...").  
+• Write in the first-person voice of the host, Stewart Alsop (\"I, Stewart Alsop, ...\").  
 • Mention the guest(s) and the show name in the very first sentence.  
-• After the introduction, include the call-to-action line:  
-  "Check out this GPT we trained on the conversation!"  
 • Do NOT add a separate H1 title; start directly with the intro sentence.  
-• Use simple section names ("Timestamps", "Key Insights", "Contact Information") with no "Introduction" header.  
+• Use simple section names (\"Timestamps\", \"Key Insights\", \"Contact Information\") with no \"Introduction\" header.  
 
-<<<EXAMPLE (do NOT copy; imitate style)>>>
-On this episode of Crazy Wisdom, I, Stewart Alsop, spoke with Neil Davies, creator of the Extelligencer project, about survival strategies in what he calls the "Dark Forest" of modern civilization — a world shaped by cryptographic trust, intelligence-immune system fusion, and the crumbling authority of legacy institutions. Listeners can find Neil on Twitter as @sigilante and explore more about his work in the Extelligencer substack.
-
-Timestamps
-00:00 Introduction of Neil Davies and the Extelligencer project, setting the stage with Dark Forest theory and operational survival concepts.
-05:00 Expansion on Dark Forest as a metaphor for Internet-age exposure, with examples like scam evolution, parasites, and the vulnerability of modern systems.
-10:00 Discussion of immune-intelligence fusion ...
-... (example truncated) ...
-
-Key Insights
-The "Dark Forest" is not just a cosmological metaphor, but a description of modern civilization's hidden dangers. ...
-Immune function and intelligence have fused ...
-... (example truncated) ...
-
-Contact Information
-• Neil Davies – Twitter @sigilante
-• Extelligencer Substack – https://extelligencer.substack.com
-<<<END EXAMPLE>>>
+RESOURCES
+---------
+The conversation has been auto-segmented into chapters with real start times:
+${chapterList}
 
 WHAT TO DELIVER
 ---------------
 1. Intro paragraph — 2–3 sentences in the same first-person style.
-2. The exact CTA line: "Check out this GPT we trained on the conversation!"
-3. Section: "Timestamps"  
-   • 6–10 entries formatted as "MM:SS Description ..." (no bullets).  
-   • Use real timestamps if present; otherwise make reasonable estimates.
-4. Section: "Key Insights"  
-   • 5–8 insights. Start each insight with a bolded short heading followed by a 2–4 sentence explanation.
-5. Section: "Contact Information"  
+2. The exact CTA line: \"Check out this GPT we trained on the conversation!\"
+3. Section: \"Timestamps\"  
+   • 6–10 entries formatted as \"MM:SS Description ...\" (no bullets).  
+   • Use the provided start times; refine descriptions if needed.
+4. Section: \"Key Insights\"  
+   • 5–8 insights. Start each insight with a **bolded** short heading followed by a 2–4 sentence explanation.
+5. Section: \"Contact Information\"  
    • Bullet list of any handles, links, or company names mentioned.  
-   • If none found, write "Not provided in transcript."
+   • If none found, write \"Not provided in transcript.\"
 
 Markdown is allowed, but keep it lightweight (plain lines for timestamps; bullets only in Contact Information).  
 Do NOT add any additional commentary before or after the show notes.
 
 TRANSCRIPT
 ----------
-${transcript}
-`;
+${transcript}`;
 };
 
-// Generate show notes using Gemini API
-export async function generateShowNotes(transcript: string): Promise<string> {
+// ────────────────────────────────────────────────────────────
+// Main entry – Two-pass show-note generation
+// ────────────────────────────────────────────────────────────
+
+export async function generateShowNotes(rawTranscript: string): Promise<string> {
   try {
-    // 1. Basic size metrics
-    console.log('[ShowNotes] Transcript length:', transcript.length, 'chars');
-    const approxTokens = Math.ceil(transcript.length / 4);
-    console.log('[ShowNotes] Approx token count:', approxTokens);
-    
-    // 2. SRT format detection
-    const srtPattern = /\d+\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/g;
-    const srtMatches = [...transcript.matchAll(srtPattern)];
-    console.log('[ShowNotes] SRT timestamps found:', srtMatches.length);
-    
-    // 3. Sample actual timestamps (first 3 and last 3)
-    if (srtMatches.length > 0) {
-      const firstThree = srtMatches.slice(0, 3).map(m => m[1]);
-      const lastThree = srtMatches.slice(-3).map(m => m[1]);
-      console.log('[ShowNotes] First timestamps:', firstThree);
-      console.log('[ShowNotes] Last timestamps:', lastThree);
+    // Basic diagnostics
+    console.log('[ShowNotes] Raw transcript length:', rawTranscript.length, 'chars');
+
+    // Parse & strip timestamps once
+    const segments = parseTimestampedTranscript(rawTranscript);
+    const plainText = stripTimestamps(segments);
+
+    // ── PASS 1 : Fast overview with Flash ──
+    const overviewModel = getGeminiModel(MODEL_OVERVIEW);
+    const overviewPrompt = generateOverviewPrompt(plainText);
+    console.time('[ShowNotes] Pass-1 (overview)');
+    const overviewRes = await overviewModel.generateContent(overviewPrompt);
+    console.timeEnd('[ShowNotes] Pass-1 (overview)');
+
+    let overviewText = overviewRes.response.text().trim();
+    // Try to extract JSON if wrapped in code fences
+    if (overviewText.startsWith('```')) {
+      overviewText = overviewText.replace(/```[a-zA-Z]*\n?|```/g, '').trim();
     }
-    
-    // 4. Check if we're sending the full transcript 
-    // (show first 100 chars and last 100 chars)
-    console.log('[ShowNotes] Start of transcript:\n', transcript.slice(0, 100));
-    console.log('[ShowNotes] End of transcript:\n', transcript.slice(-100));
-    
-    // Original processing continues...
-    const genAI = getGeminiAPI();
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-pro",
-      safetySettings: [
-        {
-          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        },
-      ],
-    });
-    
-    // 5. Log the actual prompt we're sending
-    const prompt = generateShowNotesPrompt(transcript);
-    console.log('[ShowNotes] Prompt instructions (first 300 chars):\n', prompt.slice(0, 300));
-    
-    // 6. Time the API call
-    console.time('[ShowNotes] Gemini API call');
-    const result = await model.generateContent(prompt);
-    console.timeEnd('[ShowNotes] Gemini API call');
-    
-    const text = result.response.text();
-    
-    // 7. Log the generated timestamp section for direct examination
-    const timestampSection = text.match(/## TIMESTAMPS\s+([\s\S]+?)(?=##|$)/)?.[1]?.trim();
-    console.log('[ShowNotes] Generated TIMESTAMPS section:\n', timestampSection || '<<not found>>');
-    
-    return text;
+
+    let chapters: { title: string; first: string }[] = [];
+    try {
+      chapters = JSON.parse(overviewText);
+    } catch (err) {
+      console.error('[ShowNotes] Failed to parse overview JSON', err, overviewText);
+      throw new Error('Gemini overview pass did not return valid JSON');
+    }
+
+    // Map first sentences → timestamps
+    const enriched = chapters.map((c) => ({
+      title: c.title,
+      start: lookupTimestamp(c.first, segments),
+    }));
+
+    console.log('[ShowNotes] Enriched chapters with timestamps:', enriched);
+
+    // ── PASS 2 : Deep dive with Pro 2.5 ──
+    const deepModel = getGeminiModel(MODEL_DEEPDIVE);
+    const deepPrompt = generateDeepDivePrompt(plainText, enriched);
+    console.time('[ShowNotes] Pass-2 (deep dive)');
+    const deepRes = await deepModel.generateContent(deepPrompt);
+    console.timeEnd('[ShowNotes] Pass-2 (deep dive)');
+
+    const finalText = deepRes.response.text();
+    return finalText;
   } catch (error) {
     console.error('Error generating show notes:', error);
     throw new Error(`Failed to generate show notes: ${error instanceof Error ? error.message : 'Unknown error'}`);
