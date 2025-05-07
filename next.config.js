@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+module.exports = {
   output: 'standalone',
   reactStrictMode: true,
-  swcMinify: true,
+  // Using Next.js 15 which enables Rust SWC minify by default
 };
-
-module.exports = nextConfig;

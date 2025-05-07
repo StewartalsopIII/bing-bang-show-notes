@@ -12,11 +12,12 @@ Our production server runs **linux/amd64**, while local development is on Apple 
 # From inside the repo root
 # Tag format: <DockerHub-username>/bing-bang-show-notes:latest
 
-docker buildx build \
-  --platform linux/amd64 \
-  --build-arg NEXT_PUBLIC_GEMINI_API_KEY=PLACEHOLDER_KEY \
-  -t stewartalsop/bing-bang-show-notes:latest \
-  --push .
+   docker buildx build \
+     --platform linux/amd64 \
+     --build-arg NEXT_PUBLIC_GEMINI_API_KEY=$NEXT_PUBLIC_GEMINI_API_KEY \
+     --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
+     -t stewartalsop/bing-bang-show-notes:latest \
+     --push .
 ```
 
 What this does:
