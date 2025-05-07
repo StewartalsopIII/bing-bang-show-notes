@@ -61,6 +61,9 @@ export function parseTimestampedTranscript(raw: string): Segment[] {
 // 2️⃣ Strip timestamps → plain narrative for LLM
 const stripTimestamps = (segs: Segment[]) => segs.map((s) => s.text).join(' ');
 
+// ⏲️ Get the timestamp of the *last* segment in MM:SS form
+const finalTimestamp = (segs: Segment[]) => segs[segs.length - 1].ts.slice(3, 8);
+
 // 3️⃣ Find timestamp for the first sentence of a chapter
 function lookupTimestamp(sentence: string, segs: Segment[]): string {
   const normalise = (str: string) => str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
@@ -78,9 +81,11 @@ function lookupTimestamp(sentence: string, segs: Segment[]): string {
 // Prompt helpers
 // ────────────────────────────────────────────────────────────
 
-const generateOverviewPrompt = (plain: string) => `You are an elite podcast show-note writer for \"Crazy Wisdom\".
+const generateOverviewPrompt = (plain: string, endTime: string) => `You are an elite podcast show-note writer for \"Crazy Wisdom\".
 
-TASK: Analyse the transcript and propose 6-10 thematic chapters.
+TASK: Break the ENTIRE conversation (from 00:00 **through ${endTime}**) into 8-12 chronological chapters.
+• The first chapter must start at or very near 00:00.
+• The LAST chapter must start **within the final 5 minutes** (≥ ${endTime} − 05:00).
 Return ONLY valid JSON in the exact form:
 [
   { "title": "<chapter name>", "first": "<first sentence of that chapter>" },
@@ -114,13 +119,12 @@ ${chapterList}
 WHAT TO DELIVER
 ---------------
 1. Intro paragraph — 2–3 sentences in the same first-person style.
-2. The exact CTA line: \"Check out this GPT we trained on the conversation!\"
-3. Section: \"Timestamps\"  
+2. Section: \"Timestamps\"  
    • 6–10 entries formatted as \"MM:SS Description ...\" (no bullets).  
    • Use the provided start times; refine descriptions if needed.
-4. Section: \"Key Insights\"  
+3. Section: \"Key Insights\"  
    • 5–8 insights. Start each insight with a **bolded** short heading followed by a 2–4 sentence explanation.
-5. Section: \"Contact Information\"  
+4. Section: \"Contact Information\"  
    • Bullet list of any handles, links, or company names mentioned.  
    • If none found, write \"Not provided in transcript.\"
 
@@ -147,7 +151,7 @@ export async function generateShowNotes(rawTranscript: string): Promise<string> 
 
     // ── PASS 1 : Fast overview with Flash ──
     const overviewModel = getGeminiModel(MODEL_OVERVIEW);
-    const overviewPrompt = generateOverviewPrompt(plainText);
+    const overviewPrompt = generateOverviewPrompt(plainText, finalTimestamp(segments));
     console.time('[ShowNotes] Pass-1 (overview)');
     const overviewRes = await overviewModel.generateContent(overviewPrompt);
     console.timeEnd('[ShowNotes] Pass-1 (overview)');
@@ -171,6 +175,18 @@ export async function generateShowNotes(rawTranscript: string): Promise<string> 
       title: c.title,
       start: lookupTimestamp(c.first, segments),
     }));
+
+    // Guarantee a chapter close to the real end of the episode
+    const realEnd = finalTimestamp(segments);
+    const lastMapped = enriched[enriched.length - 1]?.start ?? '00:00';
+
+    const minutes = (mmss: string) => {
+      const [m, s] = mmss.split(':').map(Number);
+      return m + s / 60;
+    };
+    if (minutes(realEnd) - minutes(lastMapped) > 5) {
+      enriched.push({ title: 'Closing Thoughts', start: realEnd });
+    }
 
     console.log('[ShowNotes] Enriched chapters with timestamps:', enriched);
 
