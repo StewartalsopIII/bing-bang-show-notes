@@ -7,7 +7,7 @@ import { generateShowNotes } from '@/lib/geminiService';
 import { SignedIn, SignedOut, SignIn } from '@clerk/nextjs';
 
 export default function Home() {
-  const [transcript, setTranscript] = useState('');
+  const [_transcript, setTranscript] = useState('');
   const [showNotes, setShowNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -43,8 +43,8 @@ export default function Home() {
       <SignedIn>
         <main className="flex min-h-screen flex-col items-center justify-between p-8 bg-gray-50">
           <div className="w-full max-w-5xl">
-            <h1 className="text-4xl font-bold text-center mb-8">Bing Bang Show Notes</h1>
-            <p className="text-center text-gray-600 mb-12 max-w-2xl mx-auto">
+            <h1 className="text-4xl font-bold text-center mb-8 text-black">Show Notes Generator</h1>
+            <p className="text-center text-black mb-12 max-w-2xl mx-auto">
               Transform your podcast transcripts into professional show notes using Google Gemini AI.
             </p>
             

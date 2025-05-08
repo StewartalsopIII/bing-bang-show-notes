@@ -12,12 +12,12 @@ Our production server runs **linux/amd64**, while local development is on Apple 
 # From inside the repo root
 # Tag format: <DockerHub-username>/bing-bang-show-notes:latest
 
-   docker buildx build \
-     --platform linux/amd64 \
-     --build-arg NEXT_PUBLIC_GEMINI_API_KEY=$NEXT_PUBLIC_GEMINI_API_KEY \
-     --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
-     -t stewartalsop/bing-bang-show-notes:latest \
-     --push .
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg NEXT_PUBLIC_GEMINI_API_KEY="$NEXT_PUBLIC_GEMINI_API_KEY" \
+  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_c2FmZS1zb2xlLTk2LmNsZXJrLmFjY291bnRzLmRldiQ" \
+  -t stewartalsop/bing-bang-show-notes:latest \
+  --push .
 ```
 
 What this does:
@@ -77,7 +77,7 @@ docker run -d --name bing-bang-show-notes \
 # Follow logs
 docker logs -f bing-bang-show-notes
 ```
-Application should now respond at `http://<server-ip>:3005`.
+Application should now respond at `http://67.205.163.48:3005`.
 
 ---
 ## 4. Reverse Proxy with Nginx + Certbot
@@ -114,7 +114,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### 4.3 Obtain SSL certificate
 ```bash
-sudo certbot --nginx -d shownotes.getcrazywisdom.com --non-interactive --agree-tos -m you@example.com --redirect
+sudo certbot --nginx -d shownotes.getcrazywisdom.com --non-interactive --agree-tos -m stewartalsopIII@gmail.com --redirect
 ```
 Certbot will:
 1. Provision a Let's Encrypt certificate.

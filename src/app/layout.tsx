@@ -31,10 +31,10 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
           <header className="p-4 flex justify-end gap-2">
             <SignedOut>
               <SignInButton mode="modal"/>
@@ -43,9 +43,9 @@ export default function RootLayout({
               <UserButton/>
             </SignedIn>
           </header>
-          {children}
-        </body>
-      </html>
+        {children}
+      </body>
+    </html>
     </ClerkProvider>
   );
 }
